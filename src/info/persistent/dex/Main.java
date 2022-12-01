@@ -16,6 +16,7 @@ package info.persistent.dex;
 
 import com.android.dexdeps.DexData;
 import com.android.dexdeps.DexDataException;
+import com.android.dexdeps.RandomAccessFileDataSource;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -57,7 +58,7 @@ public class Main {
                 List<RandomAccessFile> dexFiles = openInputFiles(fileName);
 
                 for (RandomAccessFile dexFile : dexFiles) {
-                    DexData dexData = new DexData(dexFile);
+                    DexData dexData = new DexData(new RandomAccessFileDataSource(dexFile));
                     dexData.load();
                     counts.generate(dexData, includeClasses, packageFilter, maxDepth, filter);
                     dexFile.close();

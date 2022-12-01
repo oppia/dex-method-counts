@@ -17,14 +17,13 @@
 package com.android.dexdeps;
 
 import java.io.IOException;
-import java.io.RandomAccessFile;
 import java.util.Arrays;
 
 /**
  * Data extracted from a DEX file.
  */
 public class DexData {
-    private RandomAccessFile mDexFile;
+    private DataSource dataSource;
     private HeaderItem mHeaderItem;
     private String[] mStrings;              // strings from string_data_*
     private TypeIdItem[] mTypeIds;
@@ -39,8 +38,8 @@ public class DexData {
     /**
      * Constructs a new DexData for this file.
      */
-    public DexData(RandomAccessFile raf) {
-        mDexFile = raf;
+    public DexData(DataSource dataSource) {
+        this.dataSource = dataSource;
     }
 
     /**
@@ -460,21 +459,21 @@ public class DexData {
      * Seeks the DEX file to the specified absolute position.
      */
     void seek(int position) throws IOException {
-        mDexFile.seek(position);
+        dataSource.seek(position);
     }
 
     /**
      * Fills the buffer by reading bytes from the DEX file.
      */
     void readBytes(byte[] buffer) throws IOException {
-        mDexFile.readFully(buffer);
+        dataSource.readFully(buffer);
     }
 
     /**
      * Reads a single signed byte value.
      */
     byte readByte() throws IOException {
-        mDexFile.readFully(tmpBuf, 0, 1);
+        dataSource.readFully(tmpBuf, 0, 1);
         return tmpBuf[0];
     }
 
@@ -482,7 +481,7 @@ public class DexData {
      * Reads a signed 16-bit integer, byte-swapping if necessary.
      */
     short readShort() throws IOException {
-        mDexFile.readFully(tmpBuf, 0, 2);
+        dataSource.readFully(tmpBuf, 0, 2);
         if (isBigEndian) {
             return (short) ((tmpBuf[1] & 0xff) | ((tmpBuf[0] & 0xff) << 8));
         } else {
@@ -494,7 +493,7 @@ public class DexData {
      * Reads a signed 32-bit integer, byte-swapping if necessary.
      */
     int readInt() throws IOException {
-        mDexFile.readFully(tmpBuf, 0, 4);
+        dataSource.readFully(tmpBuf, 0, 4);
 
         if (isBigEndian) {
             return (tmpBuf[3] & 0xff) | ((tmpBuf[2] & 0xff) << 8) |
