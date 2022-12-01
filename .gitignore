@@ -5,5 +5,8 @@ build/
 *.iml
 .idea/
 
-#Gradle
+# Gradle
 .gradle/
+
+# Bazel
+bazel-*
