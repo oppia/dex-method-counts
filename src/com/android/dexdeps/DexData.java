@@ -121,8 +121,8 @@ public class DexData {
         mHeaderItem.methodIdsOff = readInt();
         mHeaderItem.classDefsSize = readInt();
         mHeaderItem.classDefsOff = readInt();
-        /*mHeaderItem.dataSize =*/ readInt();
-        /*mHeaderItem.dataOff =*/ readInt();
+        mHeaderItem.dataSize = readInt();
+        mHeaderItem.dataOff = readInt();
     }
 
     /**
@@ -274,13 +274,89 @@ public class DexData {
             /* superclass_idx = */ readInt();
             /* interfaces_off = */ readInt();
             /* source_file_idx = */ readInt();
-            /* annotations_off = */ readInt();
+            mClassDefs[i].annotationsOff = readInt();
             /* class_data_off = */ readInt();
             /* static_values_off = */ readInt();
 
             //System.out.println(i + ": " + mClassDefs[i].classIdx + " " +
             //    mStrings[mTypeIds[mClassDefs[i].classIdx].descriptorIdx]);
+
+
         }
+
+        for (int i = 0; i < count; i++) {
+            if (mClassDefs[i].annotationsOff != 0) {
+                mClassDefs[i].annotationsDirectoryItem =
+                    readAnnotationsDirectoryItem(mClassDefs[i].annotationsOff);
+            }
+        }
+    }
+
+    private AnnotationsDirectoryItem readAnnotationsDirectoryItem(int offset) throws IOException {
+        seek(offset);
+        AnnotationsDirectoryItem item = new AnnotationsDirectoryItem();
+        item.classAnnotationsOff = readInt();
+        item.fieldsSize = readInt();
+        item.annotatedMethodsSize = readInt();
+        item.annotatedParametersSize = readInt();
+        item.fieldAnnotations = new FieldAnnotation[item.fieldsSize];
+        for (int i = 0; i < item.fieldsSize; i++) {
+            item.fieldAnnotations[i] = readFieldAnnotation();
+        }
+        item.methodAnnotations = new MethodAnnotation[item.annotatedMethodsSize];
+        for (int i = 0; i < item.annotatedMethodsSize; i++) {
+            item.methodAnnotations[i] = readMethodAnnotation();
+        }
+        for (int i = 0; i < item.annotatedMethodsSize; i++) {
+            item.methodAnnotations[i].annotationSetItem =
+                readAnnotationSetItem(item.methodAnnotations[i].annotationsOff);
+        }
+        return item;
+    }
+
+    private FieldAnnotation readFieldAnnotation() throws IOException {
+        FieldAnnotation annotation = new FieldAnnotation();
+        annotation.fieldIndex = readInt();
+        annotation.annotationsOff = readInt();
+        return annotation;
+    }
+
+
+    private MethodAnnotation readMethodAnnotation() throws IOException {
+        MethodAnnotation annotation = new MethodAnnotation();
+        annotation.methodIndex = readInt();
+        annotation.annotationsOff = readInt();
+        return annotation;
+    }
+
+    private AnnotationSetItem readAnnotationSetItem(int offset) throws IOException {
+        seek(offset);
+        AnnotationSetItem item = new AnnotationSetItem();
+        item.size = readInt();
+        item.annotationOffItems = new int[item.size];
+        item.annotationItems = new AnnotationItem[item.size];
+        for (int i = 0; i < item.size; i++) item.annotationOffItems[i] = readInt();
+        for (int i = 0; i < item.size; i++) {
+            item.annotationItems[i]= readAnnotationItem(item.annotationOffItems[i]);
+        }
+        return item;
+    }
+
+    private AnnotationItem readAnnotationItem(int offset) throws IOException {
+        seek(offset);
+        AnnotationItem item = new AnnotationItem();
+        EncodedAnnotation annotation = new EncodedAnnotation();
+        item.visibility = readByte() & 0xff;
+        item.annotation = annotation;
+        annotation.typeIndex = readUnsignedLeb128();
+        annotation.size = readUnsignedLeb128();
+        annotation.annotationElements = new AnnotationElement[annotation.size];
+        for (int i = 0; i < annotation.size; i++) {
+            AnnotationElement element = new AnnotationElement();
+            element.nameIndex = readUnsignedLeb128();
+            annotation.annotationElements[i] = element;
+        }
+        return item;
     }
 
     /**
@@ -346,6 +422,24 @@ public class DexData {
         return mStrings[mTypeIds[protoId.returnTypeIdx].descriptorIdx];
     }
 
+    private String[] retrieveAnnotationNames(ClassDefItem classDef, int methodIndex) {
+        if (classDef == null || classDef.annotationsDirectoryItem == null) return new String[0];
+        MethodAnnotation methodAnnotation = null;
+        for (MethodAnnotation annotation : classDef.annotationsDirectoryItem.methodAnnotations) {
+            if (methodIndex == annotation.methodIndex) {
+                methodAnnotation = annotation;
+                break;
+            }
+        }
+        if (methodAnnotation == null) return new String[0];
+        AnnotationItem[] items = methodAnnotation.annotationSetItem.annotationItems;
+        String[] annotationNames = new String[items.length];
+        for (int i = 0; i < items.length; i++) {
+            annotationNames[i] = mStrings[mTypeIds[items[i].annotation.typeIndex].descriptorIdx];
+        }
+        return annotationNames;
+    }
+
     /**
      * Returns an array with all of the class references that don't
      * correspond to classes in the DEX file.  Each class reference has
@@ -407,12 +501,21 @@ public class DexData {
     private void addExternalMethodReferences(ClassRef[] sparseRefs) {
         for (int i = 0; i < mMethodIds.length; i++) {
             if (!mTypeIds[mMethodIds[i].classIdx].internal) {
+                int classIndex = mMethodIds[i].classIdx;
+                ClassDefItem classDef = null;
+                for (ClassDefItem item : mClassDefs) {
+                    if (classIndex == item.classIdx) {
+                        classDef = item;
+                        break;
+                    }
+                }
                 MethodIdItem methodId = mMethodIds[i];
                 MethodRef newMethodRef = new MethodRef(
                         classNameFromTypeIndex(methodId.classIdx),
                         argArrayFromProtoIndex(methodId.protoIdx),
                         returnTypeFromProtoIndex(methodId.protoIdx),
-                        mStrings[methodId.nameIdx]);
+                        mStrings[methodId.nameIdx],
+                        retrieveAnnotationNames(classDef, i));
                 sparseRefs[mMethodIds[i].classIdx].addMethod(newMethodRef);
             }
         }
@@ -425,11 +528,20 @@ public class DexData {
         MethodRef[] methodRefs = new MethodRef[mMethodIds.length];
         for (int i = 0; i < mMethodIds.length; i++) {
             MethodIdItem methodId = mMethodIds[i];
+            int classIndex = mMethodIds[i].classIdx;
+            ClassDefItem classDef = null;
+            for (ClassDefItem item : mClassDefs) {
+                if (classIndex == item.classIdx) {
+                    classDef = item;
+                    break;
+                }
+            }
             methodRefs[i] = new MethodRef(
                     classNameFromTypeIndex(methodId.classIdx),
                     argArrayFromProtoIndex(methodId.protoIdx),
                     returnTypeFromProtoIndex(methodId.protoIdx),
-                    mStrings[methodId.nameIdx]);
+                    mStrings[methodId.nameIdx],
+                    retrieveAnnotationNames(classDef, i));
         }
         return methodRefs;
     }
@@ -511,13 +623,17 @@ public class DexData {
      * @throws IOException if we run off the end of the file
      */
     int readUnsignedLeb128() throws IOException {
-        int result = 0;
-        byte val;
+        int lastVal;
+        int[] values = new int[5];
+        int readCount = 0;
 
         do {
-            val = readByte();
-            result = (result << 7) | (val & 0x7f);
-        } while (val < 0);
+            lastVal = readByte() & 0xff;
+            values[readCount++] = lastVal & 0x7f;
+        } while ((lastVal >> 7) == 1);
+
+        int result = 0;
+        for (int i = 0; i < readCount; i++) result |= values[i] << (7 * i);
 
         return result;
     }
@@ -565,6 +681,7 @@ public class DexData {
         public int fieldIdsSize, fieldIdsOff;
         public int methodIdsSize, methodIdsOff;
         public int classDefsSize, classDefsOff;
+        public int dataSize, dataOff;
 
         /* expected magic values */
         public static final byte[] DEX_FILE_MAGIC = {
@@ -627,5 +744,53 @@ public class DexData {
      */
     static class ClassDefItem {
         public int classIdx;            // index into type_ids
+        public int annotationsOff;
+
+        // Reference for parsing annotations:
+        // http://www.dre.vanderbilt.edu/~schmidt/android/android-4.0/dalvik/docs/dex-format.html.
+        public AnnotationsDirectoryItem annotationsDirectoryItem;
+    }
+
+    static class AnnotationsDirectoryItem {
+        public int classAnnotationsOff;
+        public int fieldsSize;
+        public int annotatedMethodsSize;
+        public int annotatedParametersSize;
+        public FieldAnnotation[] fieldAnnotations;
+        public MethodAnnotation[] methodAnnotations;
+    }
+
+    static class FieldAnnotation {
+        public int fieldIndex;
+        public int annotationsOff;
+    }
+
+    static class MethodAnnotation {
+        public int methodIndex;
+        public int annotationsOff;
+
+        public AnnotationSetItem annotationSetItem;
+    }
+
+    static class AnnotationSetItem {
+        public int size;
+        public int[] annotationOffItems;
+
+        public AnnotationItem[] annotationItems;
+    }
+
+    static class AnnotationItem {
+        public int visibility;
+        public EncodedAnnotation annotation;
+    }
+
+    static class EncodedAnnotation {
+        public int typeIndex;
+        public int size;
+        public AnnotationElement[] annotationElements;
+    }
+
+    static class AnnotationElement {
+        public int nameIndex;
     }
 }

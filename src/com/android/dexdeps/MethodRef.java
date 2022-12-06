@@ -21,16 +21,18 @@ import java.util.Arrays;
 public class MethodRef {
     private String mDeclClass, mReturnType, mMethodName;
     private String[] mArgTypes;
+    private String[] mAnnotations;
 
     /**
      * Initializes a new field reference.
      */
     public MethodRef(String declClass, String[] argTypes, String returnType,
-            String methodName) {
+            String methodName, String[] annotations) {
         mDeclClass = declClass;
         mArgTypes = argTypes;
         mReturnType = returnType;
         mMethodName = methodName;
+        mAnnotations = annotations;
     }
 
     /**
@@ -66,6 +68,14 @@ public class MethodRef {
      */
     public String getReturnTypeName() {
         return mReturnType;
+    }
+
+    /**
+     * Returns the names of the annotations for the method represented by this
+     * reference.
+     */
+    public String[] getAnnotations() {
+        return mAnnotations;
     }
 
     /**
